@@ -1,0 +1,74 @@
+# =====================================================================
+# .htaccess — static WhisperBrowser build (runs Transformers.js fully
+# client-side). Drop the contents of dist/ into your Apache web root.
+# Requires: mod_rewrite, mod_mime, mod_headers, mod_deflate (mod_brotli,
+# mod_expires optional). AllowOverride All must be enabled.
+# =====================================================================
+
+DirectoryIndex index.html
+
+RewriteEngine On
+# If you serve from a subfolder (https://host/whisper/) instead of the web
+# root, also set:  RewriteBase /whisper/  and change the fallback below to
+# /whisper/index.html — and build with vite `base: '/whisper/'`.
+
+# --- 1. Force HTTPS ----------------------------------------------------------
+# Microphone (getUserMedia) and WebGPU both require a Secure Context.
+# localhost/127.0.0.1 are exempt by the browser, so skip them.
+RewriteCond %{HTTPS} off
+RewriteCond %{HTTP:X-Forwarded-Proto} !https
+RewriteCond %{HTTP_HOST} !^localhost [NC]
+RewriteCond %{HTTP_HOST} !^127\.0\.0\.1 [NC]
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# --- 2. MIME types -----------------------------------------------------------
+<IfModule mod_mime.c>
+  # REQUIRED: WebAssembly streaming compilation rejects anything that is not
+  # exactly application/wasm.
+  AddType application/wasm           .wasm
+  AddType text/javascript            .js .mjs
+  AddType application/json           .json
+  AddType font/woff2                 .woff2
+</IfModule>
+
+# --- 3. Cross-Origin Isolation (OPTIONAL) ------------------------------------
+# Leave COMMENTED OUT. NOT needed for WebGPU or single-threaded WASM. Only
+# enable if you opt into multi-threaded WASM (numThreads > 1). 'credentialless'
+# keeps Hugging Face CDN model weights loadable.
+# <IfModule mod_headers.c>
+#   Header always set Cross-Origin-Opener-Policy   "same-origin"
+#   Header always set Cross-Origin-Embedder-Policy "credentialless"
+# </IfModule>
+
+# --- 4. Compression ----------------------------------------------------------
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE \
+    text/html text/plain text/css \
+    text/javascript application/javascript \
+    application/json application/wasm image/svg+xml
+</IfModule>
+<IfModule mod_brotli.c>
+  AddOutputFilterByType BROTLI_COMPRESS \
+    text/html text/plain text/css \
+    text/javascript application/javascript \
+    application/json application/wasm image/svg+xml
+</IfModule>
+
+# --- 5. Cache-Control --------------------------------------------------------
+<IfModule mod_headers.c>
+  # Vite content-hashes /assets/*, safe to cache forever.
+  <FilesMatch "\.(js|mjs|css|woff2?|svg|png|jpe?g|gif|webp|ico)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  # The HTML shell must always revalidate so new deploys are seen immediately.
+  <FilesMatch "(^index\.html$|manifest\.webmanifest$)">
+    Header set Cache-Control "no-cache, max-age=0, must-revalidate"
+  </FilesMatch>
+</IfModule>
+
+# --- 6. SPA fallback ---------------------------------------------------------
+# Real files/dirs (including /assets/*.js and .wasm) are served as-is;
+# everything else falls through to index.html.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.html [L]

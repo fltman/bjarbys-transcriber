@@ -1,0 +1,29 @@
+{
+  "name": "bjarbys-transcriber",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Bjarbys Transcriber — local, in-browser audio & video transcription with Whisper (standard + KB-Whisper Swedish). Runs entirely on the user's machine, no upload, no install.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.5",
+    "lucide-react": "^0.541.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.13",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5"
+  }
+}
