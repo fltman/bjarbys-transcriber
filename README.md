@@ -1,5 +1,7 @@
 # Bjarbys Transcriber
 
+[![Support me on Patreon](https://img.shields.io/badge/Patreon-Support%20my%20work-FF424D?style=flat&logo=patreon&logoColor=white)](https://www.patreon.com/AndersBjarby)
+
 Private, **in-browser** audio &amp; video transcription. The Whisper model runs
 entirely on the user's machine via [Transformers.js](https://github.com/huggingface/transformers.js)
 (WebGPU, with a WASM/CPU fallback). **Nothing is uploaded** and **nothing needs
