@@ -2,12 +2,23 @@
 import {
   pipeline,
   env,
+  AutoModelForAudioFrameClassification,
+  AutoProcessor,
   type AutomaticSpeechRecognitionPipeline,
+  type PreTrainedModel,
+  type Processor,
 } from "@huggingface/transformers";
+import {
+  DIARIZE_WINDOW_SECONDS,
+  decodeActivity,
+  planWindows,
+  stitchWindows,
+} from "./lib/diarize";
 import type { Backend, Dtype } from "./lib/models";
 import type {
   FileProgress,
   FromWorker,
+  SpeakerActivity,
   ToWorker,
   TranscriptResult,
 } from "./lib/protocol";
@@ -17,6 +28,93 @@ env.allowLocalModels = false;
 
 let pipe: AutomaticSpeechRecognitionPipeline | null = null;
 let loadedKey = "";
+
+// ── Speaker separation (pyannote segmentation-3.0) ──────────────────────────
+// A tiny (~1.5 MB), separate model used only to detect *who* is speaking when.
+// It has nothing to do with Whisper and is loaded lazily, once, on WASM — it's
+// small enough that there's no need for the dtype/device tiers ASR gets.
+const DIARIZATION_MODEL_ID = "onnx-community/pyannote-segmentation-3.0";
+
+type DiarizationProcessor = Processor & {
+  readonly sampling_rate: number;
+};
+
+let diarizer: { model: PreTrainedModel; processor: DiarizationProcessor } | null =
+  null;
+
+// Audio kept back from a `transcribe` so the following `diarize` can reuse it.
+// The queue runs one job at a time, so a single slot is enough — and holding
+// only the newest bounds this to one recording's worth even if a job dies
+// between the two messages.
+let retainedAudio: { jobId: string; audio: Float32Array } | null = null;
+
+async function ensureDiarizer(): Promise<{
+  model: PreTrainedModel;
+  processor: DiarizationProcessor;
+}> {
+  if (diarizer) return diarizer;
+  const [model, processor] = await Promise.all([
+    AutoModelForAudioFrameClassification.from_pretrained(
+      DIARIZATION_MODEL_ID,
+      { device: "wasm", dtype: "q8" },
+    ),
+    AutoProcessor.from_pretrained(DIARIZATION_MODEL_ID),
+  ]);
+  diarizer = { model, processor: processor as DiarizationProcessor };
+  return diarizer;
+}
+
+/** Below this there is no point retrying — something other than size is wrong. */
+const MIN_DIARIZE_WINDOW_SECONDS = 5 * 60;
+
+async function disposeDiarizer(): Promise<void> {
+  const current = diarizer;
+  diarizer = null;
+  try {
+    await current?.model.dispose();
+  } catch {
+    /* already torn down by the abort */
+  }
+}
+
+/** Diarize the whole recording in windows of at most `windowSec`. */
+async function runDiarization(
+  audio: Float32Array,
+  windowSec: number,
+  onProgress: (progress: number) => void,
+): Promise<SpeakerActivity[]> {
+  const { model, processor } = await ensureDiarizer();
+  const sampleRate = processor.sampling_rate;
+
+  // Speaker indices only carry meaning within a single pass, so stitchWindows()
+  // matches them across each seam using the overlap. A recording shorter than
+  // the window takes one pass and needs no matching.
+  const windows = planWindows(audio.length / sampleRate, windowSec);
+  const parts: { window: (typeof windows)[number]; activity: SpeakerActivity[] }[] =
+    [];
+  for (const window of windows) {
+    const start = Math.round(window.startSec * sampleRate);
+    const end = Math.min(audio.length, Math.round(window.endSec * sampleRate));
+    const windowAudio = audio.subarray(start, end);
+
+    const inputs = await processor(windowAudio);
+    const { logits } = await model(inputs);
+    const [, numFrames, numClasses] = logits.dims as number[];
+    parts.push({
+      window,
+      activity: decodeActivity(
+        logits.data as Float32Array,
+        numFrames,
+        numClasses,
+        windowAudio.length / sampleRate,
+        start / sampleRate,
+        window.index,
+      ),
+    });
+    onProgress((window.index + 1) / windows.length);
+  }
+  return stitchWindows(parts);
+}
 
 function post(msg: FromWorker, transfer: Transferable[] = []): void {
   (self as unknown as Worker).postMessage(msg, transfer);
@@ -133,6 +231,8 @@ self.addEventListener("message", async (event: MessageEvent<ToWorker>) => {
   if (msg.type === "transcribe") {
     try {
       if (!pipe) throw new Error("Model is not loaded yet.");
+      // Whatever the previous job left behind is dead weight now.
+      retainedAudio = null;
       post({ type: "transcribe-start", jobId: msg.jobId });
 
       const output = (await pipe(msg.audio, {
@@ -148,6 +248,7 @@ self.addEventListener("message", async (event: MessageEvent<ToWorker>) => {
         text: output.text ?? "",
         chunks: output.chunks ?? [],
       };
+      if (msg.retainAudio) retainedAudio = { jobId: msg.jobId, audio: msg.audio };
       post({ type: "result", jobId: msg.jobId, result });
     } catch (err) {
       post({
@@ -156,6 +257,59 @@ self.addEventListener("message", async (event: MessageEvent<ToWorker>) => {
         message: String((err as Error)?.message ?? err),
       });
     }
+    return;
+  }
+
+  if (msg.type === "diarize") {
+    const audio =
+      retainedAudio?.jobId === msg.jobId ? retainedAudio.audio : null;
+    retainedAudio = null;
+    if (!audio) {
+      post({
+        type: "error",
+        jobId: msg.jobId,
+        message: "Audio for this job is no longer available in the worker.",
+      });
+      return;
+    }
+    // How much audio fits in one pass depends on the device and on how much
+    // the loaded Whisper model has already claimed — a 48-minute file failed
+    // with kb-whisper-small resident but not with a smaller model. No fixed
+    // window can be right for every combination, so on failure the window is
+    // halved and the whole run retried.
+    let windowSec = DIARIZE_WINDOW_SECONDS;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        post({
+          type: "diarize-result",
+          jobId: msg.jobId,
+          activity: await runDiarization(audio, windowSec, (progress) =>
+            post({ type: "diarize-progress", jobId: msg.jobId, progress }),
+          ),
+        });
+        return;
+      } catch (err) {
+        lastError = err;
+        // An out-of-memory abort leaves the WASM runtime unusable, so the
+        // retry needs a fresh session rather than the poisoned one.
+        await disposeDiarizer();
+        windowSec = Math.round(windowSec / 2);
+        if (windowSec < MIN_DIARIZE_WINDOW_SECONDS) break;
+      }
+    }
+    // A raw memory address rather than a message means a WASM abort, which is
+    // almost always memory. Say something the user can act on.
+    const raw = String((lastError as Error)?.message ?? lastError);
+    post({
+      type: "error",
+      jobId: msg.jobId,
+      message: /^\d+$/.test(raw)
+        ? `Not enough memory for speaker separation, even in ${Math.round(
+            (windowSec * 2) / 60,
+          )}-minute chunks. A smaller Whisper model leaves more room for it.`
+        : raw,
+    });
     return;
   }
 });

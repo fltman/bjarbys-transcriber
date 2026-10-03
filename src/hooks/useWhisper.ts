@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Backend, Dtype } from "../lib/models";
-import type { FromWorker, TranscriptResult } from "../lib/protocol";
+import type {
+  FromWorker,
+  SpeakerActivity,
+  TranscriptResult,
+} from "../lib/protocol";
 
 export type ModelStatus = "idle" | "loading" | "ready" | "error";
 
@@ -39,11 +43,13 @@ const INITIAL: ModelState = {
 interface Pending<T> {
   resolve: (value: T) => void;
   reject: (err: Error) => void;
+  onProgress?: (progress: number) => void;
 }
 
 export function useWhisper() {
   const workerRef = useRef<Worker | null>(null);
   const jobs = useRef(new Map<string, Pending<TranscriptResult>>());
+  const diarizeJobs = useRef(new Map<string, Pending<SpeakerActivity[]>>());
   const load = useRef<Pending<void> | null>(null);
   const [state, setState] = useState<ModelState>(INITIAL);
 
@@ -124,11 +130,21 @@ export function useWhisper() {
         jobs.current.delete(msg.jobId);
         break;
       }
+      case "diarize-progress":
+        diarizeJobs.current.get(msg.jobId)?.onProgress?.(msg.progress);
+        break;
+      case "diarize-result": {
+        const p = diarizeJobs.current.get(msg.jobId);
+        p?.resolve(msg.activity);
+        diarizeJobs.current.delete(msg.jobId);
+        break;
+      }
       case "error": {
         if (msg.jobId) {
-          const p = jobs.current.get(msg.jobId);
-          p?.reject(new Error(msg.message));
+          jobs.current.get(msg.jobId)?.reject(new Error(msg.message));
           jobs.current.delete(msg.jobId);
+          diarizeJobs.current.get(msg.jobId)?.reject(new Error(msg.message));
+          diarizeJobs.current.delete(msg.jobId);
         } else {
           setState((prev) => ({ ...prev, status: "error", error: msg.message }));
           load.current?.reject(new Error(msg.message));
@@ -165,7 +181,12 @@ export function useWhisper() {
     (
       jobId: string,
       audio: Float32Array,
-      opts: { language: string | null; task: "transcribe" | "translate" },
+      opts: {
+        language: string | null;
+        task: "transcribe" | "translate";
+        /** Keep the audio in the worker so diarize() can reuse it. */
+        retainAudio?: boolean;
+      },
     ) => {
       const worker = workerRef.current;
       if (!worker) return Promise.reject(new Error("Worker not ready"));
@@ -178,6 +199,7 @@ export function useWhisper() {
             audio,
             language: opts.language,
             task: opts.task,
+            retainAudio: opts.retainAudio,
           },
           [audio.buffer],
         );
@@ -186,5 +208,19 @@ export function useWhisper() {
     [],
   );
 
-  return { state, loadModel, transcribe };
+  // No audio argument: the worker still holds the buffer transcribe() sent it,
+  // so it isn't copied across the boundary twice.
+  const diarize = useCallback(
+    (jobId: string, onProgress?: (progress: number) => void) => {
+      const worker = workerRef.current;
+      if (!worker) return Promise.reject(new Error("Worker not ready"));
+      return new Promise<SpeakerActivity[]>((resolve, reject) => {
+        diarizeJobs.current.set(jobId, { resolve, reject, onProgress });
+        worker.postMessage({ type: "diarize", jobId });
+      });
+    },
+    [],
+  );
+
+  return { state, loadModel, transcribe, diarize };
 }
