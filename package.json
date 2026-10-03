@@ -2,6 +2,7 @@
   "name": "bjarbys-transcriber",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "description": "Bjarbys Transcriber — local, in-browser audio & video transcription with Whisper (standard + KB-Whisper Swedish). Runs entirely on the user's machine, no upload, no install.",
   "scripts": {

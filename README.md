@@ -78,3 +78,9 @@ smaller models.
 decoded to mono 16 kHz PCM on the main thread (`src/lib/audio.ts`) and
 transferred to the worker. Long audio is chunked (`chunk_length_s: 30`) with a
 5 s stride. See `src/lib/models.ts` for the model catalog.
+
+## License
+
+[MIT](LICENSE) © 2026 Anders Bjarby. The models are downloaded at runtime from
+Hugging Face and carry their own licenses (OpenAI Whisper and KB-Whisper are
+both Apache-2.0).
