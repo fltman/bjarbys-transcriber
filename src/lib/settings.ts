@@ -11,6 +11,7 @@ export interface Settings {
   task: "transcribe" | "translate";
   exportFormat: ExportFormat;
   autoDownload: boolean;
+  diarizeSpeakers: boolean;
 }
 
 export const LANGUAGES: { code: string | null; label: string }[] = [

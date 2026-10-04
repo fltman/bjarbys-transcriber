@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import type { Job, JobSource } from "../lib/jobs";
+import { toTxt } from "../lib/exporters";
 import { Badge, ProgressBar, Spinner } from "./ui";
 
 const SOURCE_ICON: Record<JobSource, typeof FileAudio> = {
@@ -45,8 +46,21 @@ function StatusCell({ job }: { job: Job }) {
           <Spinner className="size-3" /> Transcribing
         </Badge>
       );
-    case "done":
+    case "diarizing":
       return (
+        <div className="w-40">
+          <ProgressBar value={job.stageProgress} />
+          <span className="mt-1 block text-xs text-slate-400">
+            Separating speakers… {Math.round(job.stageProgress * 100)}%
+          </span>
+        </div>
+      );
+    case "done":
+      return job.warning ? (
+        <Badge tone="amber">
+          <TriangleAlert className="size-3" /> Done
+        </Badge>
+      ) : (
         <Badge tone="green">
           <Check className="size-3" /> Done
         </Badge>
@@ -88,7 +102,7 @@ export function JobQueue({
 
   async function copy(job: Job) {
     if (!job.result) return;
-    await navigator.clipboard.writeText(job.result.text.trim());
+    await navigator.clipboard.writeText(toTxt(job.result).trim());
     setCopied(job.id);
     window.setTimeout(() => setCopied((c) => (c === job.id ? null : c)), 1500);
   }
@@ -133,6 +147,11 @@ export function JobQueue({
                   {job.status === "done" && job.result && (
                     <p className="truncate text-xs text-slate-500">
                       {job.result.text.trim().slice(0, 80) || "(no speech detected)"}
+                    </p>
+                  )}
+                  {job.warning && (
+                    <p className="truncate text-xs text-amber-300">
+                      {job.warning}
                     </p>
                   )}
                 </div>
@@ -197,7 +216,7 @@ export function JobQueue({
                     </button>
                   </div>
                   <p className="max-h-60 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-200 scroll-thin">
-                    {job.result.text.trim() || "(no speech detected)"}
+                    {toTxt(job.result).trim() || "(no speech detected)"}
                   </p>
                 </div>
               )}

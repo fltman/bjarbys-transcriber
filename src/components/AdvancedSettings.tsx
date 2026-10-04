@@ -139,6 +139,17 @@ export function AdvancedSettings({
         />
         Automatically download each transcript when it finishes
       </label>
+
+      <label className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-300 sm:col-span-2">
+        <input
+          type="checkbox"
+          checked={settings.diarizeSpeakers}
+          onChange={(e) => onChange({ diarizeSpeakers: e.target.checked })}
+          className="size-4 rounded border-[var(--color-border)] bg-[var(--color-surface-2)] accent-sky-500"
+        />
+        Separate speakers (experimental — labels each line "Speaker 1",
+        "Speaker 2", etc.)
+      </label>
     </div>
   );
 }

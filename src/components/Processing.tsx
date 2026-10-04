@@ -109,6 +109,7 @@ const STAGE_TEXT: Record<string, string> = {
   fetching: "Downloading episode",
   decoding: "Decoding audio",
   transcribing: "Transcribing speech",
+  diarizing: "Separating speakers",
 };
 
 /**
@@ -137,12 +138,13 @@ export function ProcessingHero({
       <div className="flex items-center gap-5">
         {loading ? (
           <ProgressRing value={state.overall} label="download" />
-        ) : (
+        ) : activeJob?.status === "diarizing" ? (
           <ProgressRing
-            value={0}
-            indeterminate
-            label=""
+            value={activeJob.stageProgress}
+            label="speakers"
           />
+        ) : (
+          <ProgressRing value={0} indeterminate label="" />
         )}
 
         <div className="min-w-0 flex-1">
@@ -178,6 +180,12 @@ export function ProcessingHero({
                   </p>
                 </div>
               </div>
+
+              {activeJob.warning && (
+                <p className="mt-3 text-sm text-amber-300">
+                  {activeJob.warning}
+                </p>
+              )}
 
               <div className="mt-4">
                 <div className="mb-1.5 flex justify-between text-xs text-slate-400">

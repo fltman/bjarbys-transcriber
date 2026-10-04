@@ -7,6 +7,7 @@ export type JobStatus =
   | "fetching"
   | "decoding"
   | "transcribing"
+  | "diarizing"
   | "done"
   | "error";
 
@@ -19,6 +20,8 @@ export interface Job {
   stageProgress: number;
   result: TranscriptResult | null;
   error: string | null;
+  /** Non-fatal issue with an otherwise-successful result (e.g. speaker separation failed or was skipped). */
+  warning: string | null;
   /** Base filename used when exporting (without extension is fine). */
   downloadName: string;
   /** Lazily acquire + decode this job's audio to mono 16 kHz PCM. */
@@ -47,6 +50,7 @@ export function makeJob(input: JobInput): Job {
     stageProgress: 0,
     result: null,
     error: null,
+    warning: null,
     downloadName: input.downloadName,
     getAudio: input.getAudio,
   };
@@ -56,4 +60,5 @@ export const ACTIVE_STATUSES: JobStatus[] = [
   "fetching",
   "decoding",
   "transcribing",
+  "diarizing",
 ];

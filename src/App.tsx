@@ -11,7 +11,13 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { decodeToPCM } from "./lib/audio";
+import { WHISPER_SAMPLE_RATE, decodeToPCM } from "./lib/audio";
+import {
+  MAX_DIARIZE_MINUTES,
+  MAX_DIARIZE_SECONDS,
+  assignSpeakers,
+  smoothSpeakers,
+} from "./lib/diarize";
 import {
   type Backend,
   type Family,
@@ -60,7 +66,7 @@ const TABS: { id: Tab; label: string; icon: typeof FileAudio }[] = [
 ];
 
 export default function App() {
-  const { state, loadModel, transcribe } = useWhisper();
+  const { state, loadModel, transcribe, diarize } = useWhisper();
 
   const [settings, setSettings] = useState<Settings>({
     modelId: "KBLab/kb-whisper-base",
@@ -70,6 +76,7 @@ export default function App() {
     task: "transcribe",
     exportFormat: "txt",
     autoDownload: true,
+    diarizeSpeakers: false,
   });
   const proxyBase = DEFAULT_PROXY;
 
@@ -184,6 +191,7 @@ export default function App() {
         updateJob(job.id, {
           status: job.source === "podcast" ? "fetching" : "decoding",
           error: null,
+          warning: null,
           stageProgress: 0,
         });
         const audio = await job.getAudio((p) =>
@@ -193,14 +201,42 @@ export default function App() {
         updateJob(job.id, { status: "transcribing" });
         const loadedId = state.modelId ?? settings.modelId;
         const englishOnly = isEnglishOnly(loadedId);
+        // The diarization model has no internal chunking (unlike Whisper) and
+        // crashes on very long audio in-browser — skip it above a safe length
+        // rather than attempt and silently fail.
+        const durationSec = audio.length / WHISPER_SAMPLE_RATE;
+        const tooLongToDiarize = durationSec > MAX_DIARIZE_SECONDS;
+        const wantsDiarize = settings.diarizeSpeakers && !tooLongToDiarize;
+        // The worker holds on to the audio when it will be needed again, so
+        // diarization reuses that buffer instead of a second full copy.
         const result = await transcribe(job.id, audio, {
           language: englishOnly ? null : settings.language,
           task: englishOnly ? "transcribe" : settings.task,
+          retainAudio: wantsDiarize,
         });
 
-        updateJob(job.id, { status: "done", result });
+        let finalResult = result;
+        let warning: string | null = null;
+        if (settings.diarizeSpeakers && tooLongToDiarize) {
+          warning = `Speaker separation skipped: recording is ${Math.round(durationSec / 60)} min, longer than the ${MAX_DIARIZE_MINUTES} min limit.`;
+        } else if (wantsDiarize) {
+          updateJob(job.id, { status: "diarizing", stageProgress: 0 });
+          try {
+            const activity = await diarize(job.id, (p) =>
+              updateJob(job.id, { stageProgress: p }),
+            );
+            finalResult = {
+              ...result,
+              chunks: smoothSpeakers(assignSpeakers(result.chunks, activity)),
+            };
+          } catch (e) {
+            warning = `Speaker separation failed: ${String((e as Error)?.message ?? e)}`;
+          }
+        }
+
+        updateJob(job.id, { status: "done", result: finalResult, warning });
         if (settings.autoDownload)
-          downloadJob(job, result, settings.exportFormat);
+          downloadJob(job, finalResult, settings.exportFormat);
       } catch (e) {
         updateJob(job.id, {
           status: "error",
@@ -211,6 +247,7 @@ export default function App() {
     [
       updateJob,
       transcribe,
+      diarize,
       downloadJob,
       state.modelId,
       settings.modelId,
@@ -218,6 +255,7 @@ export default function App() {
       settings.task,
       settings.autoDownload,
       settings.exportFormat,
+      settings.diarizeSpeakers,
     ],
   );
 
@@ -522,6 +560,15 @@ export default function App() {
             rel="noreferrer"
           >
             KB-Whisper
+          </a>{" "}
+          ·{" "}
+          <a
+            href="https://huggingface.co/pyannote/segmentation-3.0"
+            className="text-slate-400 underline-offset-2 hover:underline"
+            target="_blank"
+            rel="noreferrer"
+          >
+            pyannote
           </a>{" "}
           · models download once and cache in your browser.
         </p>
