@@ -279,14 +279,20 @@ self.addEventListener("message", async (event: MessageEvent<ToWorker>) => {
     // halved and the whole run retried.
     let windowSec = DIARIZE_WINDOW_SECONDS;
     let lastError: unknown = null;
+    // A retry starts the pass over; holding progress at its high-water mark
+    // keeps the bar from jumping back to zero while it catches up.
+    let reported = 0;
+    const report = (progress: number) => {
+      if (progress <= reported) return;
+      reported = progress;
+      post({ type: "diarize-progress", jobId: msg.jobId, progress });
+    };
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
         post({
           type: "diarize-result",
           jobId: msg.jobId,
-          activity: await runDiarization(audio, windowSec, (progress) =>
-            post({ type: "diarize-progress", jobId: msg.jobId, progress }),
-          ),
+          activity: await runDiarization(audio, windowSec, report),
         });
         return;
       } catch (err) {

@@ -117,7 +117,10 @@ const movedBySmoothing = assigned.filter((c, i) => c.speaker !== predicted[i].sp
 const words = (t) => (t || "").trim().split(/\s+/).filter(Boolean).length;
 
 // Predicted ids are arbitrary integers; map each to the true label it covers
-// most (standard diarization practice) before scoring.
+// most (standard diarization practice) before scoring. Lines with no detected
+// speaker (null) are left out of the mapping, so they always score as wrong —
+// otherwise null itself gets mapped to the majority speaker and those lines
+// count as correct.
 const overlap = new Map();
 rows.forEach((r, i) => {
   if (truth[i] === "?") return;
@@ -125,7 +128,7 @@ rows.forEach((r, i) => {
   overlap.set(key, (overlap.get(key) ?? 0) + words(r.text));
 });
 const mapping = new Map();
-for (const id of new Set(predicted.map((p) => p.speaker))) {
+for (const id of new Set(predicted.map((p) => p.speaker).filter((s) => s != null))) {
   let best = null, bestN = -1;
   for (const t of ["I", "S"]) {
     const n = overlap.get(`${id}|${t}`) ?? 0;

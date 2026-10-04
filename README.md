@@ -85,9 +85,9 @@ about 1.5 MB, MIT. It runs on WASM alongside Whisper and needs no extra
 dependency. Each chunk in the `.json` export then carries `speaker` and
 `speaker_conf`, and the other formats prefix each line with `Speaker N:`.
 
-**Measured accuracy: 95.4%** of words attributed to the correct speaker, on a
+**Measured accuracy: 94.7%** of words attributed to the correct speaker, on a
 hand-labelled 12-minute two-person Swedish interview (231 utterances, 2116
-words). Reproduce with `scripts/eval-diarization.mjs` — see
+words). Lines where no speaker was detected count as wrong. Reproduce with `scripts/eval-diarization.mjs` — see
 [Evaluating speaker separation](#evaluating-speaker-separation).
 
 That figure is for a clean recording of two people. Known limits:
@@ -103,7 +103,7 @@ That figure is for a clean recording of two people. Known limits:
   out as 2 speakers. But someone who stays silent through an entire overlap
   cannot be matched and is given a fresh label rather than a guessed one, so
   very long or very lopsided recordings may still show extra speakers.
-- **Short interjections are the main error.** 43% of the wrong words sit in
+- **Short interjections are the main error.** Half of the wrong words sit in
   utterances under 1.5 s — typically a backchannel ("Just det.") spoken over
   someone still talking. A chunk's audio is dominated by the other speaker
   even though the transcribed words are the interjector's, so time-weighted
@@ -128,9 +128,9 @@ granularity is the only variable (`scripts/eval-word-timestamps.mjs`):
 
 | attribution | units | median span | word accuracy |
 |---|---|---|---|
-| phrase-level (what ships) | 288 | 1.94 s | **98.6%** |
-| word-level | 1996 | 0.20 s | 94.8% (−3.7 pp) |
-| words regrouped into sentences | 201 | 2.80 s | 97.7% (−0.9 pp) |
+| phrase-level (what ships) | 288 | 1.94 s | **98.4%** |
+| word-level | 1996 | 0.20 s | 94.7% (−3.7 pp) |
+| words regrouped into sentences | 201 | 2.80 s | 97.7% (−0.7 pp) |
 
 The padding really does cause the interjection errors — but it also does
 useful work everywhere else. A two-second span covers roughly 120 diarization
@@ -139,7 +139,7 @@ entirely on a glitch. Removing the padding loses more than it recovers, so
 phrase-sized units are the right granularity and the errors above are the
 price of it.
 
-(Those percentages are not comparable to the 95.4% quoted earlier: this
+(Those percentages are not comparable to the 94.7% quoted earlier: this
 experiment uses a different ASR model and scores against time intervals rather
 than per labelled utterance. Only the three rows are comparable to each other.)
 

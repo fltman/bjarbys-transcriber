@@ -447,5 +447,22 @@ export function smoothSpeakers(chunks: TranscriptChunk[]): TranscriptChunk[] {
       }
     }
   }
-  return result;
+  return renumberByFirstAppearance(result);
+}
+
+/**
+ * Number speakers 1, 2, 3… in the order they first speak. assignSpeakers()
+ * already does this, but smoothing can fold away every line of a speaker,
+ * which would leave a gap ("Speaker 1", "Speaker 3").
+ */
+function renumberByFirstAppearance(chunks: TranscriptChunk[]): TranscriptChunk[] {
+  const order = new Map<number, number>();
+  for (const chunk of chunks) {
+    if (chunk.speaker == null || order.has(chunk.speaker)) continue;
+    order.set(chunk.speaker, order.size + 1);
+  }
+  for (const chunk of chunks) {
+    if (chunk.speaker != null) chunk.speaker = order.get(chunk.speaker);
+  }
+  return chunks;
 }

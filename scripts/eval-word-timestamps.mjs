@@ -99,7 +99,8 @@ function score(units, label) {
     mass.set(k, (mass.get(k) ?? 0) + words(units[i].text));
   });
   const map = new Map();
-  for (const id of new Set(predicted.map((p) => p.speaker))) {
+  // null (no speaker detected) stays unmapped, so it always scores as wrong.
+  for (const id of new Set(predicted.map((p) => p.speaker).filter((s) => s != null))) {
     let best = null, bestN = -1;
     for (const t of ["I", "S"]) {
       const n = mass.get(`${id}|${t}`) ?? 0;

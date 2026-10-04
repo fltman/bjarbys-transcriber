@@ -74,6 +74,16 @@ export function useWhisper() {
       }));
       load.current?.reject(new Error(e.message || "Worker crashed."));
       load.current = null;
+      // A worker that dies (rather than throwing) never answers again, so any
+      // transcription or diarization still waiting on it would hang the queue.
+      const crashed = new Error(
+        e.message || "The transcription worker stopped unexpectedly.",
+      );
+      for (const pending of [...jobs.current.values(), ...diarizeJobs.current.values()]) {
+        pending.reject(crashed);
+      }
+      jobs.current.clear();
+      diarizeJobs.current.clear();
     };
 
     return () => {
